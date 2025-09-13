@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>91Voice - WebRTC聊天室</title>
+    <title>局域网WebRTC聊天室</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -39,7 +39,7 @@
 
         .container {
             width: 100%;
-            max-width: 1000px;
+            max-width: 1200px;
             height: 90vh;
             background: var(--background-secondary);
             border-radius: 10px;
@@ -49,7 +49,7 @@
         }
 
         .sidebar {
-            width: 280px;
+            width: 300px;
             background: var(--background-tertiary);
             padding: 20px;
             display: flex;
@@ -311,6 +311,37 @@
             display: none;
             z-index: 1000;
         }
+
+        .debug-panel {
+            background: var(--background-tertiary);
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .debug-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+
+        .debug-content {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+
+        .toggle-debug {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 12px;
+            text-align: left;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -325,13 +356,17 @@
             </div>
             
             <div class="connection-status">
-                <div class="status-dot status-connected" id="statusDot"></div>
-                <span id="statusText">已连接 1 人</span>
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">正在连接...</span>
             </div>
             
             <div class="connect-section">
                 <div class="id-label">我的ID:</div>
                 <div class="my-id" id="myId">生成中...</div>
+                
+                <div class="id-label">连接其他用户:</div>
+                <input type="text" class="connect-input" id="connectInput" placeholder="输入对方ID">
+                <button class="connect-button" id="connectButton">连接</button>
             </div>
             
             <div class="room-section">
@@ -340,17 +375,23 @@
                 <button class="action-button" id="createRoomBtn">创建新房间</button>
                 <button class="action-button secondary" id="joinRoomBtn">加入房间</button>
             </div>
+            
+            <div class="debug-panel" id="debugPanel" style="display: none;">
+                <div class="debug-title">调试信息:</div>
+                <div class="debug-content" id="debugContent"></div>
+            </div>
+            <button class="toggle-debug" id="toggleDebug">显示调试信息</button>
         </div>
         
         <div class="main-content">
             <div class="header">
-                <h2>WebRTC多人聊天室</h2>
+                <h2>局域网WebRTC聊天室</h2>
                 <div id="peerCount">连接数: 0</div>
             </div>
             
             <div class="chat-messages" id="messagesContainer">
                 <div class="system-message">
-                    欢迎使用WebRTC多人聊天室！请创建或加入一个房间开始聊天。
+                    欢迎使用局域网WebRTC聊天室！请创建或加入一个房间开始聊天。
                 </div>
             </div>
             
@@ -452,6 +493,7 @@
                         conn.send(message);
                     } catch (error) {
                         console.error('发送消息失败:', error);
+                        addDebugLog('发送消息失败: ' + error.message);
                     }
                 });
             }
@@ -535,6 +577,7 @@
                     localStorage.setItem(key, JSON.stringify(history));
                 } catch (error) {
                     console.error('保存消息失败:', error);
+                    addDebugLog('保存消息失败: ' + error.message);
                 }
             }
 
@@ -547,6 +590,7 @@
                     return JSON.parse(localStorage.getItem(key) || '[]');
                 } catch (error) {
                     console.error('加载消息失败:', error);
+                    addDebugLog('加载消息失败: ' + error.message);
                     return [];
                 }
             }
@@ -559,6 +603,7 @@
                     return true;
                 } catch (error) {
                     console.error('清除聊天记录失败:', error);
+                    addDebugLog('清除聊天记录失败: ' + error.message);
                     return false;
                 }
             }
@@ -583,13 +628,35 @@
             roomCode: document.getElementById('roomCode'),
             createRoomBtn: document.getElementById('createRoomBtn'),
             joinRoomBtn: document.getElementById('joinRoomBtn'),
+            connectInput: document.getElementById('connectInput'),
+            connectButton: document.getElementById('connectButton'),
             peerCount: document.getElementById('peerCount'),
-            notification: document.getElementById('notification')
+            notification: document.getElementById('notification'),
+            debugPanel: document.getElementById('debugPanel'),
+            debugContent: document.getElementById('debugContent'),
+            toggleDebug: document.getElementById('toggleDebug')
         };
 
         // PeerJS 实例
         let peer;
         let myPeerId;
+        let debugLogs = [];
+
+        // 添加调试日志
+        function addDebugLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            debugLogs.push(`[${timestamp}] ${message}`);
+            
+            // 限制日志数量
+            if (debugLogs.length > 50) {
+                debugLogs = debugLogs.slice(-50);
+            }
+            
+            // 更新调试面板内容
+            if (elements.debugPanel.style.display === 'block') {
+                elements.debugContent.textContent = debugLogs.join('\n');
+            }
+        }
 
         // 初始化事件监听
         function initEvents() {
@@ -608,6 +675,12 @@
             
             // 加入房间按钮
             elements.joinRoomBtn.addEventListener('click', joinRoom);
+            
+            // 连接按钮
+            elements.connectButton.addEventListener('click', connectToPeerInput);
+            
+            // 调试面板切换
+            elements.toggleDebug.addEventListener('click', toggleDebugPanel);
             
             // 加载保存的用户名
             const savedUsername = userManager.loadUsername();
@@ -640,49 +713,127 @@
             }, 3000);
         }
 
-        // 初始化PeerJS
+        // 切换调试面板
+        function toggleDebugPanel() {
+            const isVisible = elements.debugPanel.style.display === 'block';
+            elements.debugPanel.style.display = isVisible ? 'none' : 'block';
+            elements.toggleDebug.textContent = isVisible ? '显示调试信息' : '隐藏调试信息';
+            
+            if (!isVisible) {
+                elements.debugContent.textContent = debugLogs.join('\n');
+            }
+        }
+
+        // 初始化PeerJS - 使用局域网优化配置
         function initPeerJS() {
             // 生成随机ID
             myPeerId = Math.random().toString(36).substr(2, 9);
             
-            // 使用PeerJS建立连接
+            addDebugLog('正在初始化PeerJS连接...');
+            
+            // 使用局域网优化的配置
             peer = new Peer(myPeerId, {
-                host: '0.peerjs.com',
+                // 使用更可靠的信令服务器
+                host: 'peerjs-server.herokuapp.com',
                 port: 443,
                 path: '/',
-                debug: 3
+                debug: 3,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' }
+                    ]
+                }
             });
             
             peer.on('open', (id) => {
-                console.log('My peer ID is: ' + id);
+                addDebugLog('PeerJS连接已建立，ID: ' + id);
                 elements.myId.textContent = id;
                 userManager.getCurrentUser().peerId = id;
-                updateConnectionStatus('connected', '已连接');
+                updateConnectionStatus('connected', '已连接到信令服务器');
                 
                 // 启用聊天功能
                 elements.messageInput.disabled = false;
                 elements.sendButton.disabled = false;
+                
+                // 检查URL中是否有房间代码
+                const roomCode = getRoomCodeFromURL();
+                if (roomCode) {
+                    roomManager.setRoomCode(roomCode);
+                    elements.roomCode.textContent = roomCode;
+                    addSystemMessage(`已自动加入房间: ${roomCode}`);
+                }
             });
             
             peer.on('connection', (conn) => {
-                console.log('收到连接请求:', conn.peer);
+                addDebugLog('收到连接请求: ' + conn.peer);
                 setupConnection(conn);
             });
             
             peer.on('error', (err) => {
-                console.error('PeerJS错误:', err);
-                updateConnectionStatus('error', '连接错误');
+                addDebugLog('PeerJS错误: ' + err);
+                updateConnectionStatus('error', '连接错误: ' + err);
                 showNotification('连接错误: ' + err, true);
+                
+                // 尝试使用备选方案
+                if (err.toString().includes('Could not connect to peer server')) {
+                    addDebugLog('尝试使用备选信令服务器...');
+                    initPeerJSLocalFallback();
+                }
             });
             
             peer.on('disconnected', () => {
-                console.log('连接断开');
+                addDebugLog('与信令服务器的连接已断开');
                 updateConnectionStatus('disconnected', '连接断开');
                 
                 // 尝试重新连接
                 setTimeout(() => {
+                    addDebugLog('尝试重新连接到信令服务器...');
                     peer.reconnect();
                 }, 2000);
+            });
+        }
+
+        // 备选方案：尝试使用本地PeerJS服务器
+        function initPeerJSLocalFallback() {
+            addDebugLog('正在尝试本地PeerJS服务器...');
+            
+            // 尝试连接到本地可能运行的PeerJS服务器
+            const localPeer = new Peer(myPeerId + '-local', {
+                host: window.location.hostname,
+                port: 9000,
+                path: '/myapp',
+                debug: 3,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                }
+            });
+            
+            localPeer.on('open', (id) => {
+                addDebugLog('已连接到本地PeerJS服务器: ' + id);
+                peer = localPeer;
+                elements.myId.textContent = id;
+                updateConnectionStatus('connected', '已连接到本地信令服务器');
+                
+                // 重新设置事件监听
+                peer.on('connection', (conn) => {
+                    addDebugLog('收到连接请求: ' + conn.peer);
+                    setupConnection(conn);
+                });
+                
+                peer.on('error', (err) => {
+                    addDebugLog('本地PeerJS错误: ' + err);
+                });
+            });
+            
+            localPeer.on('error', (err) => {
+                addDebugLog('无法连接到本地PeerJS服务器: ' + err);
+                showNotification('无法连接到任何信令服务器，请检查网络连接', true);
             });
         }
 
@@ -690,6 +841,8 @@
         function createRoom() {
             const roomCode = roomManager.generateRoomCode();
             elements.roomCode.textContent = roomCode;
+            
+            addDebugLog('创建房间: ' + roomCode);
             
             // 广播房间信息
             userManager.broadcast({
@@ -711,6 +864,8 @@
             roomManager.setRoomCode(roomCode);
             elements.roomCode.textContent = roomCode;
             
+            addDebugLog('加入房间: ' + roomCode);
+            
             // 广播加入房间请求
             userManager.broadcast({
                 type: 'join_room',
@@ -722,6 +877,15 @@
             
             // 保存房间代码到URL
             updateURLWithRoomCode(roomCode);
+        }
+
+        // 处理手动连接输入
+        function connectToPeerInput() {
+            const peerId = elements.connectInput.value.trim();
+            if (!peerId) return;
+            
+            connectToPeer(peerId);
+            elements.connectInput.value = '';
         }
 
         // 更新URL包含房间代码
@@ -739,15 +903,25 @@
 
         // 连接到其他用户
         function connectToPeer(peerId) {
-            if (peerId === myPeerId) return; // 不连接自己
+            if (peerId === myPeerId) {
+                addDebugLog('不能连接到自己');
+                return;
+            }
             
-            console.log('正在连接到:', peerId);
+            addDebugLog('正在连接到: ' + peerId);
             
             // 建立连接
-            const conn = peer.connect(peerId);
+            const conn = peer.connect(peerId, {
+                reliable: true
+            });
+            
+            if (!conn) {
+                addDebugLog('创建连接对象失败');
+                return;
+            }
             
             conn.on('open', () => {
-                console.log('连接成功:', peerId);
+                addDebugLog('连接成功: ' + peerId);
                 setupConnection(conn);
                 
                 // 发送用户信息
@@ -769,7 +943,7 @@
             });
             
             conn.on('error', (err) => {
-                console.error('连接错误:', err);
+                addDebugLog('连接错误: ' + err);
                 showNotification('连接失败: ' + err, true);
             });
         }
@@ -781,11 +955,12 @@
             
             // 监听数据
             conn.on('data', (data) => {
+                addDebugLog('收到数据: ' + JSON.stringify(data).substring(0, 100));
                 handleIncomingData(data, conn.peer);
             });
             
             conn.on('close', () => {
-                console.log('连接关闭:', conn.peer);
+                addDebugLog('连接关闭: ' + conn.peer);
                 const userInfo = userManager.getUserInfo(conn.peer);
                 if (userInfo) {
                     addSystemMessage(`用户 ${userInfo.username} 已断开连接`);
@@ -795,7 +970,7 @@
             });
             
             conn.on('error', (err) => {
-                console.error('连接错误:', err);
+                addDebugLog('连接错误: ' + err);
                 userManager.removePeer(conn.peer);
                 removeUserFromList(conn.peer);
             });
@@ -803,8 +978,6 @@
 
         // 处理传入数据
         function handleIncomingData(data, peerId) {
-            console.log('收到数据:', data);
-            
             if (data.type === 'message') {
                 // 保存到本地存储
                 chatHistoryManager.saveMessage(roomManager.getRoomCode(), data);
@@ -878,7 +1051,6 @@
                 <div class="message-content">
                     <div class="message-header">
                         <span class="message-author">${message.user}</span>
-                        <span class="message-identifier">MAC: ${message.identifier.mac} | IP: ${message.identifier.ip}</span>
                         <span class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</span>
                     </div>
                     <div class="message-text">${message.text}</div>
@@ -945,25 +1117,6 @@
         document.addEventListener('DOMContentLoaded', () => {
             initEvents();
             initPeerJS();
-            
-            // 检查URL中是否有房间代码
-            const roomCode = getRoomCodeFromURL();
-            if (roomCode) {
-                roomManager.setRoomCode(roomCode);
-                elements.roomCode.textContent = roomCode;
-                addSystemMessage(`已自动加入房间: ${roomCode}`);
-                
-                // 广播加入房间请求
-                setTimeout(() => {
-                    if (userManager.connectedPeers.size > 0) {
-                        userManager.broadcast({
-                            type: 'join_room',
-                            roomCode: roomCode,
-                            user: userManager.getCurrentUser()
-                        });
-                    }
-                }, 1000);
-            }
         });
     </script>
 </body>
