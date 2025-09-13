@@ -269,36 +269,6 @@
             margin-bottom: 5px;
         }
 
-        .room-section {
-            margin-top: 20px;
-        }
-
-        .room-code {
-            font-weight: bold;
-            font-size: 18px;
-            text-align: center;
-            margin: 10px 0;
-            color: var(--primary-color);
-            background: rgba(88, 101, 242, 0.1);
-            padding: 8px;
-            border-radius: 5px;
-        }
-
-        .action-button {
-            width: 100%;
-            padding: 10px;
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 10px;
-        }
-
-        .action-button.secondary {
-            background: var(--background-primary);
-        }
-
         .notification {
             position: fixed;
             top: 20px;
@@ -359,13 +329,19 @@
             margin-bottom: 10px;
         }
 
-        .offline-mode {
-            background: rgba(255, 255, 255, 0.05);
+        .action-button {
+            width: 100%;
             padding: 10px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
             border-radius: 5px;
-            margin-top: 15px;
-            font-size: 13px;
-            text-align: center;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .action-button.secondary {
+            background: var(--background-primary);
         }
     </style>
 </head>
@@ -394,13 +370,6 @@
                 <button class="connect-button" id="connectButton">连接</button>
             </div>
             
-            <div class="room-section">
-                <div class="id-label">房间代码:</div>
-                <div class="room-code" id="roomCode">未设置</div>
-                <button class="action-button" id="createRoomBtn">创建新房间</button>
-                <button class="action-button secondary" id="joinRoomBtn">加入房间</button>
-            </div>
-            
             <div class="server-config">
                 <div class="id-label">信令服务器:</div>
                 <select class="server-select" id="serverSelect">
@@ -414,10 +383,6 @@
                     <input type="text" class="connect-input" id="customPath" placeholder="路径" value="/">
                 </div>
                 <button class="action-button secondary" id="reconnectButton">重新连接</button>
-            </div>
-            
-            <div class="offline-mode" id="offlineMode" style="display: none;">
-                <i class="fas fa-wifi-slash"></i> 离线模式 - 仅限局域网直连
             </div>
             
             <div class="debug-panel" id="debugPanel" style="display: none;">
@@ -435,7 +400,7 @@
             
             <div class="chat-messages" id="messagesContainer">
                 <div class="system-message">
-                    欢迎使用局域网WebRTC聊天室！请创建或加入一个房间开始聊天。
+                    欢迎使用局域网WebRTC聊天室！所有用户都在同一频道中。
                 </div>
             </div>
             
@@ -453,15 +418,12 @@
     <script>
         // 生成用户标识
         function generateUserIdentifier() {
-            const macPart = Array.from({length: 6}, () => 
-                Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
-            ).join(':');
-            
-            const ipPart = Array.from({length: 4}, () => 
-                Math.floor(Math.random() * 256)
-            ).join('.');
-            
-            return { mac: macPart, ip: ipPart };
+            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < 8; i++) {
+                result += characters.charAt(Math.floor(Math.random() * characters.length));
+            }
+            return result;
         }
 
         // 用户管理
@@ -476,10 +438,10 @@
             loadUserIdentifier() {
                 let identifier = localStorage.getItem('userIdentifier');
                 if (!identifier) {
-                    identifier = JSON.stringify(generateUserIdentifier());
+                    identifier = generateUserIdentifier();
                     localStorage.setItem('userIdentifier', identifier);
                 }
-                return JSON.parse(identifier);
+                return identifier;
             }
 
             setUsername(username) {
@@ -528,7 +490,7 @@
                     `连接数: ${this.connectedPeers.size}`;
                 
                 document.getElementById('statusText').textContent = 
-                    `已连接 ${this.connectedPeers.size + 1} 人`;
+                    `已连接 ${this.connectedPeers.size} 人`;
             }
 
             broadcast(message) {
@@ -548,40 +510,6 @@
 
             setUserInfo(peerId, userInfo) {
                 this.users.set(peerId, userInfo);
-            }
-        }
-
-        // 房间管理
-        class RoomManager {
-            constructor() {
-                this.roomCode = null;
-                this.roomPeers = new Set();
-            }
-
-            generateRoomCode() {
-                // 生成4位数字房间代码
-                this.roomCode = Math.floor(1000 + Math.random() * 9000).toString();
-                return this.roomCode;
-            }
-
-            setRoomCode(code) {
-                this.roomCode = code;
-            }
-
-            getRoomCode() {
-                return this.roomCode;
-            }
-
-            addPeerToRoom(peerId) {
-                this.roomPeers.add(peerId);
-            }
-
-            removePeerFromRoom(peerId) {
-                this.roomPeers.delete(peerId);
-            }
-
-            getRoomPeers() {
-                return Array.from(this.roomPeers);
             }
         }
 
@@ -605,12 +533,11 @@
             }
 
             // 保存消息到本地存储
-            saveMessage(roomId, message) {
+            saveMessage(message) {
                 if (!this.saveHistory) return;
                 
                 try {
-                    const key = `chat_history_${roomId}`;
-                    let history = JSON.parse(localStorage.getItem(key) || '[]');
+                    let history = JSON.parse(localStorage.getItem('chat_history') || '[]');
                     
                     // 限制历史记录数量，最多保存200条
                     if (history.length >= 200) {
@@ -618,7 +545,7 @@
                     }
                     
                     history.push(message);
-                    localStorage.setItem(key, JSON.stringify(history));
+                    localStorage.setItem('chat_history', JSON.stringify(history));
                 } catch (error) {
                     console.error('保存消息失败:', error);
                     addDebugLog('保存消息失败: ' + error.message);
@@ -626,12 +553,11 @@
             }
 
             // 从本地存储加载消息
-            loadMessages(roomId) {
+            loadMessages() {
                 if (!this.saveHistory) return [];
                 
                 try {
-                    const key = `chat_history_${roomId}`;
-                    return JSON.parse(localStorage.getItem(key) || '[]');
+                    return JSON.parse(localStorage.getItem('chat_history') || '[]');
                 } catch (error) {
                     console.error('加载消息失败:', error);
                     addDebugLog('加载消息失败: ' + error.message);
@@ -640,10 +566,9 @@
             }
 
             // 清除聊天记录
-            clearHistory(roomId) {
+            clearHistory() {
                 try {
-                    const key = `chat_history_${roomId}`;
-                    localStorage.removeItem(key);
+                    localStorage.removeItem('chat_history');
                     return true;
                 } catch (error) {
                     console.error('清除聊天记录失败:', error);
@@ -653,9 +578,8 @@
             }
         }
 
-        // 初始化用户管理器、房间管理器和聊天记录管理器
+        // 初始化用户管理器和聊天记录管理器
         const userManager = new UserManager();
-        const roomManager = new RoomManager();
         const chatHistoryManager = new ChatHistoryManager();
 
         // DOM 元素
@@ -669,9 +593,6 @@
             myUsername: document.getElementById('myUsername'),
             statusDot: document.getElementById('statusDot'),
             statusText: document.getElementById('statusText'),
-            roomCode: document.getElementById('roomCode'),
-            createRoomBtn: document.getElementById('createRoomBtn'),
-            joinRoomBtn: document.getElementById('joinRoomBtn'),
             connectInput: document.getElementById('connectInput'),
             connectButton: document.getElementById('connectButton'),
             peerCount: document.getElementById('peerCount'),
@@ -684,8 +605,7 @@
             customHost: document.getElementById('customHost'),
             customPort: document.getElementById('customPort'),
             customPath: document.getElementById('customPath'),
-            reconnectButton: document.getElementById('reconnectButton'),
-            offlineMode: document.getElementById('offlineMode')
+            reconnectButton: document.getElementById('reconnectButton')
         };
 
         // PeerJS 实例
@@ -746,12 +666,6 @@
                 }
             });
             
-            // 创建房间按钮
-            elements.createRoomBtn.addEventListener('click', createRoom);
-            
-            // 加入房间按钮
-            elements.joinRoomBtn.addEventListener('click', joinRoom);
-            
             // 连接按钮
             elements.connectButton.addEventListener('click', connectToPeerInput);
             
@@ -784,6 +698,17 @@
             
             // 加载服务器配置
             loadServerConfig();
+            
+            // 加载历史消息
+            loadHistoryMessages();
+        }
+
+        // 加载历史消息
+        function loadHistoryMessages() {
+            const messages = chatHistoryManager.loadMessages();
+            messages.forEach(message => {
+                renderMessage(message);
+            });
         }
 
         // 处理服务器选择变化
@@ -928,16 +853,8 @@
                 // 重置重连尝试计数
                 reconnectAttempts = 0;
                 
-                // 隐藏离线模式提示
-                elements.offlineMode.style.display = 'none';
-                
-                // 检查URL中是否有房间代码
-                const roomCode = getRoomCodeFromURL();
-                if (roomCode) {
-                    roomManager.setRoomCode(roomCode);
-                    elements.roomCode.textContent = roomCode;
-                    addSystemMessage(`已自动加入房间: ${roomCode}`);
-                }
+                // 广播用户加入消息
+                broadcastUserJoin();
             });
             
             peer.on('connection', (conn) => {
@@ -965,8 +882,9 @@
                             reconnectToServer();
                         }, 2000);
                     } else {
-                        // 所有服务器尝试失败，进入离线模式
-                        enableOfflineMode();
+                        // 所有服务器尝试失败
+                        updateConnectionStatus('error', '所有服务器连接失败');
+                        showNotification('无法连接到任何信令服务器', true);
                     }
                 } else {
                     updateConnectionStatus('error', '连接错误: ' + err);
@@ -986,6 +904,17 @@
             });
         }
 
+        // 广播用户加入消息
+        function broadcastUserJoin() {
+            const user = userManager.getCurrentUser();
+            userManager.broadcast({
+                type: 'user_join',
+                user: user.username,
+                identifier: user.identifier,
+                peerId: user.peerId
+            });
+        }
+
         // 切换到下一个可用服务器
         function switchToNextServer() {
             const servers = ['default', 'heroku', 'custom'];
@@ -1002,63 +931,6 @@
             addDebugLog(`切换到服务器: ${currentServerConfig.label}`);
         }
 
-        // 启用离线模式
-        function enableOfflineMode() {
-            addDebugLog('所有服务器连接尝试失败，进入离线模式');
-            updateConnectionStatus('disconnected', '离线模式 - 仅限局域网直连');
-            
-            // 显示离线模式提示
-            elements.offlineMode.style.display = 'block';
-            
-            // 仍然允许本地连接
-            elements.messageInput.disabled = false;
-            elements.sendButton.disabled = false;
-            
-            showNotification('已进入离线模式，仅支持局域网内直连', false);
-        }
-
-        // 创建房间
-        function createRoom() {
-            const roomCode = roomManager.generateRoomCode();
-            elements.roomCode.textContent = roomCode;
-            
-            addDebugLog('创建房间: ' + roomCode);
-            
-            // 广播房间信息
-            userManager.broadcast({
-                type: 'room_created',
-                roomCode: roomCode
-            });
-            
-            showNotification(`已创建房间: ${roomCode}`);
-            
-            // 保存房间代码到URL
-            updateURLWithRoomCode(roomCode);
-        }
-
-        // 加入房间
-        function joinRoom() {
-            const roomCode = prompt('请输入房间代码:');
-            if (!roomCode) return;
-            
-            roomManager.setRoomCode(roomCode);
-            elements.roomCode.textContent = roomCode;
-            
-            addDebugLog('加入房间: ' + roomCode);
-            
-            // 广播加入房间请求
-            userManager.broadcast({
-                type: 'join_room',
-                roomCode: roomCode,
-                user: userManager.getCurrentUser()
-            });
-            
-            showNotification(`已加入房间: ${roomCode}`);
-            
-            // 保存房间代码到URL
-            updateURLWithRoomCode(roomCode);
-        }
-
         // 处理手动连接输入
         function connectToPeerInput() {
             const peerId = elements.connectInput.value.trim();
@@ -1068,23 +940,18 @@
             elements.connectInput.value = '';
         }
 
-        // 更新URL包含房间代码
-        function updateURLWithRoomCode(roomCode) {
-            const url = new URL(window.location);
-            url.searchParams.set('room', roomCode);
-            window.history.replaceState({}, '', url);
-        }
-
-        // 从URL获取房间代码
-        function getRoomCodeFromURL() {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('room');
-        }
-
         // 连接到其他用户
         function connectToPeer(peerId) {
             if (peerId === myPeerId) {
                 addDebugLog('不能连接到自己');
+                showNotification('不能连接到自己', true);
+                return;
+            }
+            
+            // 检查是否已经连接
+            if (userManager.connectedPeers.has(peerId)) {
+                addDebugLog('已经连接到该用户: ' + peerId);
+                showNotification('已经连接到该用户', true);
                 return;
             }
             
@@ -1097,6 +964,7 @@
             
             if (!conn) {
                 addDebugLog('创建连接对象失败');
+                showNotification('创建连接失败', true);
                 return;
             }
             
@@ -1113,13 +981,7 @@
                     peerId: user.peerId
                 });
                 
-                // 如果已加入房间，发送房间信息
-                if (roomManager.getRoomCode()) {
-                    conn.send({
-                        type: 'room_info',
-                        roomCode: roomManager.getRoomCode()
-                    });
-                }
+                showNotification(`已连接到用户: ${peerId}`);
             });
             
             conn.on('error', (err) => {
@@ -1160,35 +1022,13 @@
         function handleIncomingData(data, peerId) {
             if (data.type === 'message') {
                 // 保存到本地存储
-                chatHistoryManager.saveMessage(roomManager.getRoomCode(), data);
+                chatHistoryManager.saveMessage(data);
                 // 渲染消息
                 renderMessage(data);
             } else if (data.type === 'user_join') {
                 userManager.setUserInfo(peerId, data);
                 addUserToList(peerId, data.user);
                 addSystemMessage(`用户 ${data.user} 已加入聊天`);
-                
-                // 自动连接回这个用户
-                if (data.peerId && !userManager.connectedPeers.has(data.peerId)) {
-                    connectToPeer(data.peerId);
-                }
-            } else if (data.type === 'room_created') {
-                roomManager.setRoomCode(data.roomCode);
-                elements.roomCode.textContent = data.roomCode;
-                addSystemMessage(`已加入房间: ${data.roomCode}`);
-                updateURLWithRoomCode(data.roomCode);
-            } else if (data.type === 'join_room') {
-                if (data.roomCode === roomManager.getRoomCode()) {
-                    // 同一个房间的用户，自动连接
-                    connectToPeer(peerId);
-                }
-            } else if (data.type === 'room_info') {
-                if (data.roomCode && !roomManager.getRoomCode()) {
-                    roomManager.setRoomCode(data.roomCode);
-                    elements.roomCode.textContent = data.roomCode;
-                    addSystemMessage(`已加入房间: ${data.roomCode}`);
-                    updateURLWithRoomCode(data.roomCode);
-                }
             }
         }
 
@@ -1212,7 +1052,7 @@
             userManager.broadcast(message);
             
             // 保存到本地存储
-            chatHistoryManager.saveMessage(roomManager.getRoomCode(), message);
+            chatHistoryManager.saveMessage(message);
             
             // 清空输入框
             elements.messageInput.value = '';
@@ -1231,14 +1071,26 @@
                 <div class="message-content">
                     <div class="message-header">
                         <span class="message-author">${message.user}</span>
-                        <span class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</span>
+                        <span class="message-time">${formatTime(message.timestamp)}</span>
                     </div>
-                    <div class="message-text">${message.text}</div>
+                    <div class="message-text">${escapeHtml(message.text)}</div>
                 </div>
             `;
             
             elements.messagesContainer.appendChild(messageDiv);
             elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString();
+        }
+
+        // HTML转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // 添加系统消息
