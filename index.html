@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>局域网WebRTC聊天室（全连接版）</title>
+    <title>局域网WebRTC聊天室（设备固定ID版）</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -349,6 +349,24 @@
             color: var(--text-muted);
             margin-left: 5px;
         }
+        
+        .device-id-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .reset-id-button {
+            width: 100%;
+            padding: 8px;
+            background: var(--error-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -368,12 +386,18 @@
             </div>
             
             <div class="connect-section">
-                <div class="id-label">我的ID:</div>
+                <div class="id-label">我的设备ID:</div>
                 <div class="my-id" id="myId">生成中...</div>
                 
                 <div class="id-label">连接其他用户:</div>
                 <input type="text" class="connect-input" id="connectInput" placeholder="输入对方ID">
                 <button class="connect-button" id="connectButton">连接</button>
+            </div>
+            
+            <div class="device-id-section">
+                <div class="id-label">设备标识信息:</div>
+                <div class="my-id" id="deviceInfo">加载中...</div>
+                <button class="reset-id-button" id="resetIdButton">重置设备ID</button>
             </div>
             
             <div class="server-config">
@@ -400,13 +424,13 @@
         
         <div class="main-content">
             <div class="header">
-                <h2>局域网WebRTC聊天室（全连接版）</h2>
+                <h2>局域网WebRTC聊天室（设备固定ID版）</h2>
                 <div id="peerCount">直接连接: 0 | 中继连接: 0</div>
             </div>
             
             <div class="chat-messages" id="messagesContainer">
                 <div class="system-message">
-                    欢迎使用局域网WebRTC聊天室！所有用户都在同一频道中。
+                    欢迎使用局域网WebRTC聊天室！您的设备已分配固定ID。
                 </div>
             </div>
             
@@ -422,34 +446,75 @@
     <div class="notification" id="notification"></div>
 
     <script>
-        // 生成用户标识
-        function generateUserIdentifier() {
-            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            let result = '';
-            for (let i = 0; i < 8; i++) {
-                result += characters.charAt(Math.floor(Math.random() * characters.length));
+        // 生成设备唯一标识符
+        function generateDeviceId() {
+            // 使用高精度时间戳和随机数生成唯一ID
+            const timestamp = Date.now().toString(36);
+            const randomStr = Math.random().toString(36).substr(2, 9);
+            return `device_${timestamp}_${randomStr}`;
+        }
+
+        // 获取或创建设备ID
+        function getOrCreateDeviceId() {
+            let deviceId = localStorage.getItem('deviceId');
+            if (!deviceId) {
+                deviceId = generateDeviceId();
+                localStorage.setItem('deviceId', deviceId);
+                
+                // 同时存储创建时间
+                localStorage.setItem('deviceIdCreated', Date.now().toString());
             }
-            return result;
+            return deviceId;
+        }
+
+        // 生成浏览器指纹（辅助标识）
+        function generateBrowserFingerprint() {
+            try {
+                const fingerprints = [];
+                
+                // 用户代理
+                fingerprints.push(navigator.userAgent);
+                
+                // 屏幕信息
+                fingerprints.push(`${screen.width}x${screen.height}`);
+                fingerprints.push(`${screen.colorDepth}bit`);
+                
+                // 时区
+                fingerprints.push(new Date().getTimezoneOffset().toString());
+                
+                // 语言
+                fingerprints.push(navigator.language);
+                
+                // 硬件并发数
+                if (navigator.hardwareConcurrency) {
+                    fingerprints.push(navigator.hardwareConcurrency.toString());
+                }
+                
+                // 计算简化的指纹哈希
+                let hash = 0;
+                const fingerprintStr = fingerprints.join('|');
+                for (let i = 0; i < fingerprintStr.length; i++) {
+                    const char = fingerprintStr.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // 转换为32位整数
+                }
+                
+                return Math.abs(hash).toString(36);
+            } catch (e) {
+                return 'unknown';
+            }
         }
 
         // 用户管理
         class UserManager {
             constructor() {
                 this.currentUser = null;
-                this.userIdentifier = this.loadUserIdentifier();
+                this.deviceId = getOrCreateDeviceId();
+                this.browserFingerprint = generateBrowserFingerprint();
                 this.connectedPeers = new Map(); // 直接连接
                 this.relayPeers = new Map();     // 中继连接
                 this.users = new Map();
                 this.allUsers = new Set();       // 所有已知用户
-            }
-
-            loadUserIdentifier() {
-                let identifier = localStorage.getItem('userIdentifier');
-                if (!identifier) {
-                    identifier = generateUserIdentifier();
-                    localStorage.setItem('userIdentifier', identifier);
-                }
-                return identifier;
             }
 
             setUsername(username) {
@@ -459,7 +524,8 @@
                 
                 this.currentUser = {
                     username: username.trim(),
-                    identifier: this.userIdentifier,
+                    deviceId: this.deviceId,
+                    browserFingerprint: this.browserFingerprint,
                     peerId: null
                 };
                 
@@ -558,6 +624,33 @@
                 this.allUsers.delete(peerId);
                 this.updatePeerCount();
             }
+            
+            // 重置设备ID
+            resetDeviceId() {
+                const oldDeviceId = this.deviceId;
+                this.deviceId = generateDeviceId();
+                localStorage.setItem('deviceId', this.deviceId);
+                localStorage.setItem('deviceIdCreated', Date.now().toString());
+                
+                // 更新当前用户信息
+                if (this.currentUser) {
+                    this.currentUser.deviceId = this.deviceId;
+                }
+                
+                return { oldDeviceId, newDeviceId: this.deviceId };
+            }
+            
+            // 获取设备信息
+            getDeviceInfo() {
+                const created = localStorage.getItem('deviceIdCreated');
+                const createdDate = created ? new Date(parseInt(created)).toLocaleString() : '未知';
+                
+                return {
+                    id: this.deviceId,
+                    fingerprint: this.browserFingerprint,
+                    created: createdDate
+                };
+            }
         }
 
         // 聊天记录管理
@@ -653,7 +746,9 @@
             customPort: document.getElementById('customPort'),
             customPath: document.getElementById('customPath'),
             reconnectButton: document.getElementById('reconnectButton'),
-            userCount: document.getElementById('userCount')
+            userCount: document.getElementById('userCount'),
+            deviceInfo: document.getElementById('deviceInfo'),
+            resetIdButton: document.getElementById('resetIdButton')
         };
 
         // PeerJS 实例
@@ -726,6 +821,9 @@
             // 重新连接按钮
             elements.reconnectButton.addEventListener('click', reconnectToServer);
             
+            // 重置设备ID按钮
+            elements.resetIdButton.addEventListener('click', resetDeviceId);
+            
             // 加载保存的用户名
             const savedUsername = userManager.loadUsername();
             if (savedUsername) {
@@ -744,11 +842,36 @@
                 }, 500);
             }
             
+            // 显示设备信息
+            updateDeviceInfo();
+            
             // 加载服务器配置
             loadServerConfig();
             
             // 加载历史消息
             loadHistoryMessages();
+        }
+        
+        // 更新设备信息显示
+        function updateDeviceInfo() {
+            const deviceInfo = userManager.getDeviceInfo();
+            elements.deviceInfo.textContent = `ID: ${deviceInfo.id.substr(0, 10)}... | 指纹: ${deviceInfo.fingerprint}`;
+            elements.myId.textContent = deviceInfo.id;
+        }
+        
+        // 重置设备ID
+        function resetDeviceId() {
+            if (confirm('确定要重置设备ID吗？这将使其他用户无法通过旧ID联系到您。')) {
+                const result = userManager.resetDeviceId();
+                addDebugLog(`设备ID已重置: ${result.oldDeviceId} -> ${result.newDeviceId}`);
+                showNotification('设备ID已重置，请重新连接服务器');
+                
+                // 更新显示
+                updateDeviceInfo();
+                
+                // 重新连接
+                reconnectToServer();
+            }
         }
 
         // 加载历史消息
@@ -863,15 +986,15 @@
             }
         }
 
-        // 初始化PeerJS - 使用可配置服务器
+        // 初始化PeerJS - 使用可配置服务器和设备固定ID
         function initPeerJS() {
-            // 生成随机ID
-            myPeerId = Math.random().toString(36).substr(2, 9);
+            // 使用设备ID作为PeerID
+            myPeerId = userManager.deviceId;
             
             addDebugLog(`正在初始化PeerJS连接至: ${currentServerConfig.host}`);
             updateConnectionStatus('connecting', `正在连接至 ${currentServerConfig.label}...`);
             
-            // 使用配置的服务器
+            // 使用配置的服务器和设备固定ID
             peer = new Peer(myPeerId, {
                 host: currentServerConfig.host,
                 port: currentServerConfig.port,
@@ -890,7 +1013,6 @@
             
             peer.on('open', (id) => {
                 addDebugLog(`PeerJS连接已建立，ID: ${id} (服务器: ${currentServerConfig.label})`);
-                elements.myId.textContent = id;
                 userManager.getCurrentUser().peerId = id;
                 userManager.addKnownUser(id);
                 updateConnectionStatus('connected', `已连接到 ${currentServerConfig.label}`);
@@ -968,7 +1090,8 @@
             userManager.broadcast({
                 type: 'user_join',
                 user: user.username,
-                identifier: user.identifier,
+                deviceId: user.deviceId,
+                browserFingerprint: user.browserFingerprint,
                 peerId: user.peerId
             });
         }
@@ -1041,7 +1164,8 @@
                 conn.send({
                     type: 'user_join',
                     user: user.username,
-                    identifier: user.identifier,
+                    deviceId: user.deviceId,
+                    browserFingerprint: user.browserFingerprint,
                     peerId: user.peerId
                 });
                 
@@ -1182,7 +1306,7 @@
             const message = {
                 type: 'message',
                 user: user.username,
-                identifier: user.identifier,
+                deviceId: user.deviceId,
                 text: text,
                 timestamp: Date.now(),
                 relay: userManager.connectedPeers.size === 0 // 如果没有直接连接，需要中继
