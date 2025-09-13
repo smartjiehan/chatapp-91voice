@@ -342,6 +342,31 @@
             text-align: left;
             margin-top: 5px;
         }
+
+        .server-config {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .server-select {
+            width: 100%;
+            padding: 8px;
+            background: var(--background-primary);
+            border: 2px solid var(--background-tertiary);
+            border-radius: 5px;
+            color: var(--text-normal);
+            margin-bottom: 10px;
+        }
+
+        .offline-mode {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 13px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -374,6 +399,25 @@
                 <div class="room-code" id="roomCode">未设置</div>
                 <button class="action-button" id="createRoomBtn">创建新房间</button>
                 <button class="action-button secondary" id="joinRoomBtn">加入房间</button>
+            </div>
+            
+            <div class="server-config">
+                <div class="id-label">信令服务器:</div>
+                <select class="server-select" id="serverSelect">
+                    <option value="default">默认服务器 (0.peerjs.com)</option>
+                    <option value="heroku">Heroku服务器 (peerjs-server.herokuapp.com)</option>
+                    <option value="custom">自定义服务器...</option>
+                </select>
+                <div id="customServerConfig" style="display: none;">
+                    <input type="text" class="connect-input" id="customHost" placeholder="主机地址">
+                    <input type="number" class="connect-input" id="customPort" placeholder="端口" value="443">
+                    <input type="text" class="connect-input" id="customPath" placeholder="路径" value="/">
+                </div>
+                <button class="action-button secondary" id="reconnectButton">重新连接</button>
+            </div>
+            
+            <div class="offline-mode" id="offlineMode" style="display: none;">
+                <i class="fas fa-wifi-slash"></i> 离线模式 - 仅限局域网直连
             </div>
             
             <div class="debug-panel" id="debugPanel" style="display: none;">
@@ -634,13 +678,45 @@
             notification: document.getElementById('notification'),
             debugPanel: document.getElementById('debugPanel'),
             debugContent: document.getElementById('debugContent'),
-            toggleDebug: document.getElementById('toggleDebug')
+            toggleDebug: document.getElementById('toggleDebug'),
+            serverSelect: document.getElementById('serverSelect'),
+            customServerConfig: document.getElementById('customServerConfig'),
+            customHost: document.getElementById('customHost'),
+            customPort: document.getElementById('customPort'),
+            customPath: document.getElementById('customPath'),
+            reconnectButton: document.getElementById('reconnectButton'),
+            offlineMode: document.getElementById('offlineMode')
         };
 
         // PeerJS 实例
         let peer;
         let myPeerId;
         let debugLogs = [];
+        let currentServerConfig = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+
+        // 服务器配置
+        const SERVER_CONFIGS = {
+            default: {
+                host: '0.peerjs.com',
+                port: 443,
+                path: '/',
+                label: '默认服务器'
+            },
+            heroku: {
+                host: 'peerjs-server.herokuapp.com',
+                port: 443,
+                path: '/',
+                label: 'Heroku服务器'
+            },
+            custom: {
+                host: '',
+                port: 443,
+                path: '/',
+                label: '自定义服务器'
+            }
+        };
 
         // 添加调试日志
         function addDebugLog(message) {
@@ -682,6 +758,12 @@
             // 调试面板切换
             elements.toggleDebug.addEventListener('click', toggleDebugPanel);
             
+            // 服务器选择
+            elements.serverSelect.addEventListener('change', handleServerChange);
+            
+            // 重新连接按钮
+            elements.reconnectButton.addEventListener('click', reconnectToServer);
+            
             // 加载保存的用户名
             const savedUsername = userManager.loadUsername();
             if (savedUsername) {
@@ -699,6 +781,90 @@
                     }
                 }, 500);
             }
+            
+            // 加载服务器配置
+            loadServerConfig();
+        }
+
+        // 处理服务器选择变化
+        function handleServerChange() {
+            const selectedServer = elements.serverSelect.value;
+            
+            if (selectedServer === 'custom') {
+                elements.customServerConfig.style.display = 'block';
+                
+                // 加载自定义服务器配置
+                const customConfig = JSON.parse(localStorage.getItem('customServerConfig') || '{}');
+                elements.customHost.value = customConfig.host || '';
+                elements.customPort.value = customConfig.port || '443';
+                elements.customPath.value = customConfig.path || '/';
+            } else {
+                elements.customServerConfig.style.display = 'none';
+                currentServerConfig = {...SERVER_CONFIGS[selectedServer]};
+                localStorage.setItem('selectedServer', selectedServer);
+                
+                // 重新连接
+                reconnectToServer();
+            }
+        }
+
+        // 保存自定义服务器配置
+        function saveCustomServerConfig() {
+            const customConfig = {
+                host: elements.customHost.value,
+                port: parseInt(elements.customPort.value) || 443,
+                path: elements.customPath.value || '/'
+            };
+            
+            localStorage.setItem('customServerConfig', JSON.stringify(customConfig));
+            currentServerConfig = {...customConfig, label: '自定义服务器'};
+            
+            return customConfig;
+        }
+
+        // 加载服务器配置
+        function loadServerConfig() {
+            const selectedServer = localStorage.getItem('selectedServer') || 'default';
+            elements.serverSelect.value = selectedServer;
+            
+            if (selectedServer === 'custom') {
+                const customConfig = JSON.parse(localStorage.getItem('customServerConfig') || '{}');
+                SERVER_CONFIGS.custom = {
+                    ...SERVER_CONFIGS.custom,
+                    ...customConfig
+                };
+                elements.customServerConfig.style.display = 'block';
+                elements.customHost.value = customConfig.host || '';
+                elements.customPort.value = customConfig.port || '443';
+                elements.customPath.value = customConfig.path || '/';
+            }
+            
+            currentServerConfig = {...SERVER_CONFIGS[selectedServer]};
+        }
+
+        // 重新连接到服务器
+        function reconnectToServer() {
+            if (elements.serverSelect.value === 'custom') {
+                saveCustomServerConfig();
+            }
+            
+            addDebugLog(`正在重新连接到服务器: ${currentServerConfig.label}`);
+            updateConnectionStatus('connecting', '正在重新连接...');
+            
+            // 销毁现有Peer实例
+            if (peer) {
+                try {
+                    peer.destroy();
+                } catch (e) {
+                    console.error('销毁Peer实例时出错:', e);
+                }
+            }
+            
+            // 重置重连尝试计数
+            reconnectAttempts = 0;
+            
+            // 重新初始化
+            setTimeout(initPeerJS, 1000);
         }
 
         // 显示通知
@@ -724,19 +890,19 @@
             }
         }
 
-        // 初始化PeerJS - 使用局域网优化配置
+        // 初始化PeerJS - 使用可配置服务器
         function initPeerJS() {
             // 生成随机ID
             myPeerId = Math.random().toString(36).substr(2, 9);
             
-            addDebugLog('正在初始化PeerJS连接...');
+            addDebugLog(`正在初始化PeerJS连接至: ${currentServerConfig.host}`);
+            updateConnectionStatus('connecting', `正在连接至 ${currentServerConfig.label}...`);
             
-            // 使用局域网优化的配置
+            // 使用配置的服务器
             peer = new Peer(myPeerId, {
-                // 使用更可靠的信令服务器
-                host: 'peerjs-server.herokuapp.com',
-                port: 443,
-                path: '/',
+                host: currentServerConfig.host,
+                port: currentServerConfig.port,
+                path: currentServerConfig.path,
                 debug: 3,
                 config: {
                     'iceServers': [
@@ -750,14 +916,20 @@
             });
             
             peer.on('open', (id) => {
-                addDebugLog('PeerJS连接已建立，ID: ' + id);
+                addDebugLog(`PeerJS连接已建立，ID: ${id} (服务器: ${currentServerConfig.label})`);
                 elements.myId.textContent = id;
                 userManager.getCurrentUser().peerId = id;
-                updateConnectionStatus('connected', '已连接到信令服务器');
+                updateConnectionStatus('connected', `已连接到 ${currentServerConfig.label}`);
                 
                 // 启用聊天功能
                 elements.messageInput.disabled = false;
                 elements.sendButton.disabled = false;
+                
+                // 重置重连尝试计数
+                reconnectAttempts = 0;
+                
+                // 隐藏离线模式提示
+                elements.offlineMode.style.display = 'none';
                 
                 // 检查URL中是否有房间代码
                 const roomCode = getRoomCodeFromURL();
@@ -774,14 +946,31 @@
             });
             
             peer.on('error', (err) => {
-                addDebugLog('PeerJS错误: ' + err);
-                updateConnectionStatus('error', '连接错误: ' + err);
-                showNotification('连接错误: ' + err, true);
+                addDebugLog(`PeerJS错误 (${currentServerConfig.label}): ${err}`);
                 
-                // 尝试使用备选方案
                 if (err.toString().includes('Could not connect to peer server')) {
-                    addDebugLog('尝试使用备选信令服务器...');
-                    initPeerJSLocalFallback();
+                    updateConnectionStatus('error', `无法连接到 ${currentServerConfig.label}`);
+                    
+                    // 尝试使用备选方案
+                    reconnectAttempts++;
+                    
+                    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        addDebugLog(`尝试 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}: 正在尝试其他服务器...`);
+                        
+                        // 切换到下一个服务器
+                        switchToNextServer();
+                        
+                        // 延迟后重试
+                        setTimeout(() => {
+                            reconnectToServer();
+                        }, 2000);
+                    } else {
+                        // 所有服务器尝试失败，进入离线模式
+                        enableOfflineMode();
+                    }
+                } else {
+                    updateConnectionStatus('error', '连接错误: ' + err);
+                    showNotification('连接错误: ' + err, true);
                 }
             });
             
@@ -797,44 +986,35 @@
             });
         }
 
-        // 备选方案：尝试使用本地PeerJS服务器
-        function initPeerJSLocalFallback() {
-            addDebugLog('正在尝试本地PeerJS服务器...');
+        // 切换到下一个可用服务器
+        function switchToNextServer() {
+            const servers = ['default', 'heroku', 'custom'];
+            const currentServer = elements.serverSelect.value;
+            let currentIndex = servers.indexOf(currentServer);
             
-            // 尝试连接到本地可能运行的PeerJS服务器
-            const localPeer = new Peer(myPeerId + '-local', {
-                host: window.location.hostname,
-                port: 9000,
-                path: '/myapp',
-                debug: 3,
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' }
-                    ]
-                }
-            });
+            // 切换到下一个服务器
+            currentIndex = (currentIndex + 1) % servers.length;
+            const nextServer = servers[currentIndex];
             
-            localPeer.on('open', (id) => {
-                addDebugLog('已连接到本地PeerJS服务器: ' + id);
-                peer = localPeer;
-                elements.myId.textContent = id;
-                updateConnectionStatus('connected', '已连接到本地信令服务器');
-                
-                // 重新设置事件监听
-                peer.on('connection', (conn) => {
-                    addDebugLog('收到连接请求: ' + conn.peer);
-                    setupConnection(conn);
-                });
-                
-                peer.on('error', (err) => {
-                    addDebugLog('本地PeerJS错误: ' + err);
-                });
-            });
+            elements.serverSelect.value = nextServer;
+            currentServerConfig = {...SERVER_CONFIGS[nextServer]};
             
-            localPeer.on('error', (err) => {
-                addDebugLog('无法连接到本地PeerJS服务器: ' + err);
-                showNotification('无法连接到任何信令服务器，请检查网络连接', true);
-            });
+            addDebugLog(`切换到服务器: ${currentServerConfig.label}`);
+        }
+
+        // 启用离线模式
+        function enableOfflineMode() {
+            addDebugLog('所有服务器连接尝试失败，进入离线模式');
+            updateConnectionStatus('disconnected', '离线模式 - 仅限局域网直连');
+            
+            // 显示离线模式提示
+            elements.offlineMode.style.display = 'block';
+            
+            // 仍然允许本地连接
+            elements.messageInput.disabled = false;
+            elements.sendButton.disabled = false;
+            
+            showNotification('已进入离线模式，仅支持局域网内直连', false);
         }
 
         // 创建房间
