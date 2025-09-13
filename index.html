@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC聊天室 - 局域网与互联网</title>
+    <title>局域网WebRTC聊天室</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -19,8 +19,6 @@
             --success-color: #3ba55d;
             --error-color: #ed4245;
             --warning-color: #faa81a;
-            --local-network: #43b581;
-            --internet: #eb459e;
         }
 
         * {
@@ -37,7 +35,6 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
         }
 
         .container {
@@ -346,54 +343,6 @@
         .action-button.secondary {
             background: var(--background-primary);
         }
-        
-        .network-type {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 14px;
-            padding: 8px;
-            border-radius: 4px;
-            background: var(--background-primary);
-            margin-top: 10px;
-        }
-        
-        .network-badge {
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .network-local {
-            background: var(--local-network);
-        }
-        
-        .network-internet {
-            background: var(--internet);
-        }
-        
-        .info-section {
-            background: rgba(79, 84, 92, 0.2);
-            padding: 12px;
-            border-radius: 8px;
-            margin-top: 15px;
-            font-size: 13px;
-        }
-        
-        .info-section h4 {
-            margin-bottom: 8px;
-            color: var(--text-bright);
-        }
-        
-        .info-section ul {
-            padding-left: 20px;
-            margin-bottom: 8px;
-        }
-        
-        .info-section li {
-            margin-bottom: 5px;
-        }
     </style>
 </head>
 <body>
@@ -410,12 +359,6 @@
             <div class="connection-status">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">正在连接...</span>
-            </div>
-            
-            <div class="network-type">
-                <i class="fas fa-network-wired"></i>
-                <span>连接类型:</span>
-                <span class="network-badge network-local" id="networkType">未知</span>
             </div>
             
             <div class="connect-section">
@@ -442,17 +385,6 @@
                 <button class="action-button secondary" id="reconnectButton">重新连接</button>
             </div>
             
-            <div class="info-section">
-                <h4>连接信息</h4>
-                <p>此聊天室支持:</p>
-                <ul>
-                    <li>局域网内直接通信</li>
-                    <li>互联网上的P2P通信</li>
-                    <li>最多可连接20+用户</li>
-                </ul>
-                <p>连接类型将根据网络环境自动检测。</p>
-            </div>
-            
             <div class="debug-panel" id="debugPanel" style="display: none;">
                 <div class="debug-title">调试信息:</div>
                 <div class="debug-content" id="debugContent"></div>
@@ -462,16 +394,13 @@
         
         <div class="main-content">
             <div class="header">
-                <h2>WebRTC聊天室</h2>
+                <h2>局域网WebRTC聊天室</h2>
                 <div id="peerCount">连接数: 0</div>
             </div>
             
             <div class="chat-messages" id="messagesContainer">
                 <div class="system-message">
-                    欢迎使用WebRTC聊天室！支持局域网和互联网通信。
-                </div>
-                <div class="system-message">
-                    提示：要连接互联网用户，需要双方使用相同的信令服务器。
+                    欢迎使用局域网WebRTC聊天室！所有用户都在同一频道中。
                 </div>
             </div>
             
@@ -504,7 +433,6 @@
                 this.userIdentifier = this.loadUserIdentifier();
                 this.connectedPeers = new Map();
                 this.users = new Map();
-                this.connectionTypes = new Map(); // 存储连接类型
             }
 
             loadUserIdentifier() {
@@ -539,9 +467,8 @@
                 return this.currentUser;
             }
 
-            addPeer(peerId, connection, userInfo = null, connectionType = 'unknown') {
+            addPeer(peerId, connection, userInfo = null) {
                 this.connectedPeers.set(peerId, connection);
-                this.connectionTypes.set(peerId, connectionType);
                 
                 if (userInfo) {
                     this.users.set(peerId, userInfo);
@@ -554,7 +481,6 @@
             removePeer(peerId) {
                 this.connectedPeers.delete(peerId);
                 this.users.delete(peerId);
-                this.connectionTypes.delete(peerId);
                 this.updatePeerCount();
                 return this.connectedPeers.size;
             }
@@ -568,7 +494,7 @@
             }
 
             broadcast(message) {
-                this.connectedPeers.forEach((conn, peerId) => {
+                this.connectedPeers.forEach(conn => {
                     try {
                         conn.send(message);
                     } catch (error) {
@@ -585,45 +511,76 @@
             setUserInfo(peerId, userInfo) {
                 this.users.set(peerId, userInfo);
             }
-            
-            setConnectionType(peerId, type) {
-                this.connectionTypes.set(peerId, type);
-                this.updateUserList();
+        }
+
+        // 聊天记录管理
+        class ChatHistoryManager {
+            constructor() {
+                this.saveHistory = true;
+                this.loadSettings();
             }
-            
-            updateUserList() {
-                // 清除现有用户列表（除了自己）
-                const userList = document.getElementById('userList');
-                const myUserItem = document.getElementById('user-item-me');
-                userList.innerHTML = '';
-                if (myUserItem) {
-                    userList.appendChild(myUserItem);
-                }
+
+            loadSettings() {
+                const settings = JSON.parse(localStorage.getItem('chat_settings') || '{}');
+                this.saveHistory = settings.saveHistory !== undefined ? settings.saveHistory : true;
+            }
+
+            saveSettings() {
+                const settings = {
+                    saveHistory: this.saveHistory
+                };
+                localStorage.setItem('chat_settings', JSON.stringify(settings));
+            }
+
+            // 保存消息到本地存储
+            saveMessage(message) {
+                if (!this.saveHistory) return;
                 
-                // 添加所有连接的用户
-                this.users.forEach((userInfo, peerId) => {
-                    const userItem = document.createElement('div');
-                    userItem.className = 'user-item';
-                    userItem.id = `user-${peerId}`;
+                try {
+                    let history = JSON.parse(localStorage.getItem('chat_history') || '[]');
                     
-                    const connectionType = this.connectionTypes.get(peerId) || 'unknown';
-                    const typeBadge = connectionType === 'local' ? 
-                        '<span class="network-badge network-local">局域网</span>' : 
-                        '<span class="network-badge network-internet">互联网</span>';
+                    // 限制历史记录数量，最多保存200条
+                    if (history.length >= 200) {
+                        history = history.slice(-190);
+                    }
                     
-                    userItem.innerHTML = `
-                        <div class="user-avatar">${userInfo.user[0]?.toUpperCase() || '?'}</div>
-                        <div>${userInfo.user}</div>
-                        <div style="margin-left: auto;">${typeBadge}</div>
-                    `;
-                    
-                    userList.appendChild(userItem);
-                });
+                    history.push(message);
+                    localStorage.setItem('chat_history', JSON.stringify(history));
+                } catch (error) {
+                    console.error('保存消息失败:', error);
+                    addDebugLog('保存消息失败: ' + error.message);
+                }
+            }
+
+            // 从本地存储加载消息
+            loadMessages() {
+                if (!this.saveHistory) return [];
+                
+                try {
+                    return JSON.parse(localStorage.getItem('chat_history') || '[]');
+                } catch (error) {
+                    console.error('加载消息失败:', error);
+                    addDebugLog('加载消息失败: ' + error.message);
+                    return [];
+                }
+            }
+
+            // 清除聊天记录
+            clearHistory() {
+                try {
+                    localStorage.removeItem('chat_history');
+                    return true;
+                } catch (error) {
+                    console.error('清除聊天记录失败:', error);
+                    addDebugLog('清除聊天记录失败: ' + error.message);
+                    return false;
+                }
             }
         }
 
-        // 初始化用户管理器
+        // 初始化用户管理器和聊天记录管理器
         const userManager = new UserManager();
+        const chatHistoryManager = new ChatHistoryManager();
 
         // DOM 元素
         const elements = {
@@ -648,8 +605,7 @@
             customHost: document.getElementById('customHost'),
             customPort: document.getElementById('customPort'),
             customPath: document.getElementById('customPath'),
-            reconnectButton: document.getElementById('reconnectButton'),
-            networkType: document.getElementById('networkType')
+            reconnectButton: document.getElementById('reconnectButton')
         };
 
         // PeerJS 实例
@@ -728,17 +684,6 @@
                 userManager.setUsername(savedUsername);
                 elements.myUsername.textContent = savedUsername;
                 elements.myAvatar.textContent = savedUsername[0].toUpperCase();
-                
-                // 添加自己到用户列表
-                const myUserItem = document.createElement('div');
-                myUserItem.className = 'user-item';
-                myUserItem.id = 'user-item-me';
-                myUserItem.innerHTML = `
-                    <div class="user-avatar">${savedUsername[0]?.toUpperCase() || '?'}</div>
-                    <div>${savedUsername} (我)</div>
-                    <div style="margin-left: auto;"><span class="network-badge network-local">本机</span></div>
-                `;
-                elements.userList.appendChild(myUserItem);
             } else {
                 // 提示用户输入用户名
                 setTimeout(() => {
@@ -747,23 +692,23 @@
                         userManager.setUsername(username);
                         elements.myUsername.textContent = username;
                         elements.myAvatar.textContent = username[0].toUpperCase();
-                        
-                        // 添加自己到用户列表
-                        const myUserItem = document.createElement('div');
-                        myUserItem.className = 'user-item';
-                        myUserItem.id = 'user-item-me';
-                        myUserItem.innerHTML = `
-                            <div class="user-avatar">${username[0]?.toUpperCase() || '?'}</div>
-                            <div>${username} (我)</div>
-                            <div style="margin-left: auto;"><span class="network-badge network-local">本机</span></div>
-                        `;
-                        elements.userList.appendChild(myUserItem);
                     }
                 }, 500);
             }
             
             // 加载服务器配置
             loadServerConfig();
+            
+            // 加载历史消息
+            loadHistoryMessages();
+        }
+
+        // 加载历史消息
+        function loadHistoryMessages() {
+            const messages = chatHistoryManager.loadMessages();
+            messages.forEach(message => {
+                renderMessage(message);
+            });
         }
 
         // 处理服务器选择变化
@@ -1037,60 +982,12 @@
                 });
                 
                 showNotification(`已连接到用户: ${peerId}`);
-                
-                // 检测连接类型
-                detectConnectionType(conn);
             });
             
             conn.on('error', (err) => {
                 addDebugLog('连接错误: ' + err);
                 showNotification('连接失败: ' + err, true);
             });
-        }
-
-        // 检测连接类型（局域网或互联网）
-        function detectConnectionType(conn) {
-            // 简单检测方法：检查对等ID是否与本地IP相关
-            // 实际应用中可以使用更复杂的检测方法
-            const localIPs = ['192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '169.254.'];
-            
-            let isLocal = false;
-            for (const ipPrefix of localIPs) {
-                if (conn.peer.includes(ipPrefix)) {
-                    isLocal = true;
-                    break;
-                }
-            }
-            
-            const connectionType = isLocal ? 'local' : 'internet';
-            userManager.setConnectionType(conn.peer, connectionType);
-            
-            // 更新网络类型显示
-            updateNetworkTypeDisplay();
-            
-            addDebugLog(`检测到连接类型: ${connectionType} (${conn.peer})`);
-        }
-
-        // 更新网络类型显示
-        function updateNetworkTypeDisplay() {
-            let hasLocal = false;
-            let hasInternet = false;
-            
-            userManager.connectionTypes.forEach(type => {
-                if (type === 'local') hasLocal = true;
-                if (type === 'internet') hasInternet = true;
-            });
-            
-            if (hasInternet) {
-                elements.networkType.textContent = '互联网';
-                elements.networkType.className = 'network-badge network-internet';
-            } else if (hasLocal) {
-                elements.networkType.textContent = '局域网';
-                elements.networkType.className = 'network-badge network-local';
-            } else {
-                elements.networkType.textContent = '未知';
-                elements.networkType.className = 'network-badge';
-            }
         }
 
         // 设置连接
@@ -1112,31 +1009,26 @@
                 }
                 userManager.removePeer(conn.peer);
                 removeUserFromList(conn.peer);
-                updateNetworkTypeDisplay();
             });
             
             conn.on('error', (err) => {
                 addDebugLog('连接错误: ' + err);
                 userManager.removePeer(conn.peer);
                 removeUserFromList(conn.peer);
-                updateNetworkTypeDisplay();
             });
         }
 
         // 处理传入数据
         function handleIncomingData(data, peerId) {
             if (data.type === 'message') {
+                // 保存到本地存储
+                chatHistoryManager.saveMessage(data);
                 // 渲染消息
                 renderMessage(data);
             } else if (data.type === 'user_join') {
                 userManager.setUserInfo(peerId, data);
                 addUserToList(peerId, data.user);
                 addSystemMessage(`用户 ${data.user} 已加入聊天`);
-                
-                // 检测连接类型
-                if (userManager.connectedPeers.has(peerId)) {
-                    detectConnectionType(userManager.connectedPeers.get(peerId));
-                }
             }
         }
 
@@ -1158,6 +1050,9 @@
             
             // 广播消息
             userManager.broadcast(message);
+            
+            // 保存到本地存储
+            chatHistoryManager.saveMessage(message);
             
             // 清空输入框
             elements.messageInput.value = '';
@@ -1212,7 +1107,16 @@
             // 检查是否已存在
             if (document.getElementById(`user-${peerId}`)) return;
             
-            userManager.updateUserList();
+            const userItem = document.createElement('div');
+            userItem.className = 'user-item';
+            userItem.id = `user-${peerId}`;
+            
+            userItem.innerHTML = `
+                <div class="user-avatar">${username[0]?.toUpperCase() || '?'}</div>
+                <div>${username}</div>
+            `;
+            
+            elements.userList.appendChild(userItem);
         }
 
         // 从列表中移除用户
