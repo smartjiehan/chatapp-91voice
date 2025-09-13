@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>局域网WebRTC聊天室</title>
+    <title>局域网WebRTC聊天室（全连接版）</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -343,14 +343,20 @@
         .action-button.secondary {
             background: var(--background-primary);
         }
+        
+        .connection-type {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-left: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="sidebar">
-            <h3>聊天室成员</h3>
+            <h3>聊天室成员 <span id="userCount">(1)</span></h3>
             <div class="user-list" id="userList">
-                <div class="user-item">
+                <div class="user-item" id="myUserItem">
                     <div class="user-avatar" id="myAvatar">ME</div>
                     <div id="myUsername">我</div>
                 </div>
@@ -394,8 +400,8 @@
         
         <div class="main-content">
             <div class="header">
-                <h2>局域网WebRTC聊天室</h2>
-                <div id="peerCount">连接数: 0</div>
+                <h2>局域网WebRTC聊天室（全连接版）</h2>
+                <div id="peerCount">直接连接: 0 | 中继连接: 0</div>
             </div>
             
             <div class="chat-messages" id="messagesContainer">
@@ -431,8 +437,10 @@
             constructor() {
                 this.currentUser = null;
                 this.userIdentifier = this.loadUserIdentifier();
-                this.connectedPeers = new Map();
+                this.connectedPeers = new Map(); // 直接连接
+                this.relayPeers = new Map();     // 中继连接
                 this.users = new Map();
+                this.allUsers = new Set();       // 所有已知用户
             }
 
             loadUserIdentifier() {
@@ -467,39 +475,67 @@
                 return this.currentUser;
             }
 
-            addPeer(peerId, connection, userInfo = null) {
-                this.connectedPeers.set(peerId, connection);
-                
-                if (userInfo) {
-                    this.users.set(peerId, userInfo);
+            addPeer(peerId, connection, isRelay = false) {
+                if (isRelay) {
+                    this.relayPeers.set(peerId, connection);
+                } else {
+                    this.connectedPeers.set(peerId, connection);
                 }
                 
                 this.updatePeerCount();
-                return this.connectedPeers.size;
+                return this.connectedPeers.size + this.relayPeers.size;
             }
 
             removePeer(peerId) {
-                this.connectedPeers.delete(peerId);
-                this.users.delete(peerId);
-                this.updatePeerCount();
-                return this.connectedPeers.size;
+                let removed = false;
+                if (this.connectedPeers.has(peerId)) {
+                    this.connectedPeers.delete(peerId);
+                    removed = true;
+                }
+                if (this.relayPeers.has(peerId)) {
+                    this.relayPeers.delete(peerId);
+                    removed = true;
+                }
+                
+                if (removed) {
+                    this.updatePeerCount();
+                }
+                return this.connectedPeers.size + this.relayPeers.size;
             }
 
             updatePeerCount() {
                 document.getElementById('peerCount').textContent = 
-                    `连接数: ${this.connectedPeers.size}`;
+                    `直接连接: ${this.connectedPeers.size} | 中继连接: ${this.relayPeers.size}`;
                 
                 document.getElementById('statusText').textContent = 
-                    `已连接 ${this.connectedPeers.size} 人`;
+                    `已连接 ${this.connectedPeers.size + this.relayPeers.size + 1} 人`;
+                
+                document.getElementById('userCount').textContent = 
+                    `(${this.allUsers.size})`;
             }
 
-            broadcast(message) {
-                this.connectedPeers.forEach(conn => {
-                    try {
-                        conn.send(message);
-                    } catch (error) {
-                        console.error('发送消息失败:', error);
-                        addDebugLog('发送消息失败: ' + error.message);
+            broadcast(message, excludePeerId = null) {
+                // 广播到直接连接
+                this.connectedPeers.forEach((conn, peerId) => {
+                    if (peerId !== excludePeerId) {
+                        try {
+                            conn.send(message);
+                        } catch (error) {
+                            console.error('发送消息失败:', error);
+                            addDebugLog('发送消息失败: ' + error.message);
+                        }
+                    }
+                });
+                
+                // 广播到中继连接
+                this.relayPeers.forEach((conn, peerId) => {
+                    if (peerId !== excludePeerId) {
+                        try {
+                            conn.send(message);
+                        } catch (error) {
+                            console.error('发送中继消息失败:', error);
+                            addDebugLog('发送中继消息失败: ' + error.message);
+                        }
                     }
                 });
             }
@@ -510,6 +546,17 @@
 
             setUserInfo(peerId, userInfo) {
                 this.users.set(peerId, userInfo);
+                this.allUsers.add(peerId);
+            }
+
+            addKnownUser(peerId) {
+                this.allUsers.add(peerId);
+                this.updatePeerCount();
+            }
+
+            removeKnownUser(peerId) {
+                this.allUsers.delete(peerId);
+                this.updatePeerCount();
             }
         }
 
@@ -605,7 +652,8 @@
             customHost: document.getElementById('customHost'),
             customPort: document.getElementById('customPort'),
             customPath: document.getElementById('customPath'),
-            reconnectButton: document.getElementById('reconnectButton')
+            reconnectButton: document.getElementById('reconnectButton'),
+            userCount: document.getElementById('userCount')
         };
 
         // PeerJS 实例
@@ -844,6 +892,7 @@
                 addDebugLog(`PeerJS连接已建立，ID: ${id} (服务器: ${currentServerConfig.label})`);
                 elements.myId.textContent = id;
                 userManager.getCurrentUser().peerId = id;
+                userManager.addKnownUser(id);
                 updateConnectionStatus('connected', `已连接到 ${currentServerConfig.label}`);
                 
                 // 启用聊天功能
@@ -907,6 +956,15 @@
         // 广播用户加入消息
         function broadcastUserJoin() {
             const user = userManager.getCurrentUser();
+            
+            // 向所有已知用户发送连接请求
+            userManager.allUsers.forEach(peerId => {
+                if (peerId !== user.peerId) {
+                    connectToPeer(peerId, true);
+                }
+            });
+            
+            // 广播用户加入消息
             userManager.broadcast({
                 type: 'user_join',
                 user: user.username,
@@ -941,17 +999,21 @@
         }
 
         // 连接到其他用户
-        function connectToPeer(peerId) {
+        function connectToPeer(peerId, isAutoConnect = false) {
             if (peerId === myPeerId) {
-                addDebugLog('不能连接到自己');
-                showNotification('不能连接到自己', true);
+                if (!isAutoConnect) {
+                    addDebugLog('不能连接到自己');
+                    showNotification('不能连接到自己', true);
+                }
                 return;
             }
             
             // 检查是否已经连接
-            if (userManager.connectedPeers.has(peerId)) {
-                addDebugLog('已经连接到该用户: ' + peerId);
-                showNotification('已经连接到该用户', true);
+            if (userManager.connectedPeers.has(peerId) || userManager.relayPeers.has(peerId)) {
+                if (!isAutoConnect) {
+                    addDebugLog('已经连接到该用户: ' + peerId);
+                    showNotification('已经连接到该用户', true);
+                }
                 return;
             }
             
@@ -964,13 +1026,15 @@
             
             if (!conn) {
                 addDebugLog('创建连接对象失败');
-                showNotification('创建连接失败', true);
+                if (!isAutoConnect) {
+                    showNotification('创建连接失败', true);
+                }
                 return;
             }
             
             conn.on('open', () => {
                 addDebugLog('连接成功: ' + peerId);
-                setupConnection(conn);
+                setupConnection(conn, false);
                 
                 // 发送用户信息
                 const user = userManager.getCurrentUser();
@@ -981,19 +1045,57 @@
                     peerId: user.peerId
                 });
                 
-                showNotification(`已连接到用户: ${peerId}`);
+                if (!isAutoConnect) {
+                    showNotification(`已连接到用户: ${peerId}`);
+                }
             });
             
             conn.on('error', (err) => {
                 addDebugLog('连接错误: ' + err);
-                showNotification('连接失败: ' + err, true);
+                if (!isAutoConnect) {
+                    showNotification('连接失败: ' + err, true);
+                }
+                
+                // 尝试建立中继连接
+                attemptRelayConnection(peerId);
             });
         }
 
+        // 尝试建立中继连接
+        function attemptRelayConnection(targetPeerId) {
+            addDebugLog(`尝试通过中继连接到: ${targetPeerId}`);
+            
+            // 查找已经连接到目标用户的连接
+            let relayConn = null;
+            
+            userManager.connectedPeers.forEach((conn, peerId) => {
+                if (!relayConn) {
+                    try {
+                        conn.send({
+                            type: 'relay_request',
+                            targetPeerId: targetPeerId,
+                            sourcePeerId: myPeerId
+                        });
+                        relayConn = conn;
+                        addDebugLog(`通过 ${peerId} 中继到 ${targetPeerId}`);
+                    } catch (e) {
+                        console.error('中继请求发送失败:', e);
+                    }
+                }
+            });
+            
+            if (!relayConn) {
+                addDebugLog('找不到可用的中继连接');
+            }
+        }
+
         // 设置连接
-        function setupConnection(conn) {
+        function setupConnection(conn, isIncoming = true) {
             // 存储连接
-            userManager.addPeer(conn.peer, conn);
+            userManager.addPeer(conn.peer, conn, !isIncoming);
+            
+            // 添加到已知用户列表
+            userManager.addKnownUser(conn.peer);
             
             // 监听数据
             conn.on('data', (data) => {
@@ -1008,12 +1110,14 @@
                     addSystemMessage(`用户 ${userInfo.username} 已断开连接`);
                 }
                 userManager.removePeer(conn.peer);
+                userManager.removeKnownUser(conn.peer);
                 removeUserFromList(conn.peer);
             });
             
             conn.on('error', (err) => {
                 addDebugLog('连接错误: ' + err);
                 userManager.removePeer(conn.peer);
+                userManager.removeKnownUser(conn.peer);
                 removeUserFromList(conn.peer);
             });
         }
@@ -1025,10 +1129,45 @@
                 chatHistoryManager.saveMessage(data);
                 // 渲染消息
                 renderMessage(data);
+                
+                // 中继消息给其他用户
+                if (data.relay) {
+                    userManager.broadcast(data, peerId);
+                }
             } else if (data.type === 'user_join') {
                 userManager.setUserInfo(peerId, data);
                 addUserToList(peerId, data.user);
                 addSystemMessage(`用户 ${data.user} 已加入聊天`);
+                
+                // 尝试连接新用户
+                if (data.peerId !== myPeerId) {
+                    connectToPeer(data.peerId, true);
+                }
+            } else if (data.type === 'relay_request') {
+                // 处理中继请求
+                if (data.targetPeerId === myPeerId) {
+                    addDebugLog(`收到来自 ${data.sourcePeerId} 的中继连接请求`);
+                    
+                    // 建立与源用户的中继连接
+                    const relayConn = peer.connect(data.sourcePeerId, {
+                        reliable: true
+                    });
+                    
+                    if (relayConn) {
+                        relayConn.on('open', () => {
+                            addDebugLog(`中继连接已建立: ${data.sourcePeerId}`);
+                            setupConnection(relayConn, false);
+                            
+                            // 通知源用户中继已建立
+                            relayConn.send({
+                                type: 'relay_established',
+                                peerId: myPeerId
+                            });
+                        });
+                    }
+                }
+            } else if (data.type === 'relay_established') {
+                addDebugLog(`与 ${peerId} 的中继连接已建立`);
             }
         }
 
@@ -1045,7 +1184,8 @@
                 user: user.username,
                 identifier: user.identifier,
                 text: text,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                relay: userManager.connectedPeers.size === 0 // 如果没有直接连接，需要中继
             };
             
             // 广播消息
@@ -1111,9 +1251,13 @@
             userItem.className = 'user-item';
             userItem.id = `user-${peerId}`;
             
+            const connectionType = userManager.connectedPeers.has(peerId) ? 
+                '<span class="connection-type">(直接)</span>' : 
+                '<span class="connection-type">(中继)</span>';
+            
             userItem.innerHTML = `
                 <div class="user-avatar">${username[0]?.toUpperCase() || '?'}</div>
-                <div>${username}</div>
+                <div>${username} ${connectionType}</div>
             `;
             
             elements.userList.appendChild(userItem);
